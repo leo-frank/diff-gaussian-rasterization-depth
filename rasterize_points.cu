@@ -31,34 +31,34 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     };
     return lambda;
 }
-//为渲染forward 中 num_rendered, color, radii, geomBuffer, binningBuffer, imgBuffer,depth_map = _C.rasterize_gaussians(*args)
+
 std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,torch::Tensor,torch::Tensor>
 RasterizeGaussiansCUDA(
-	const torch::Tensor& background,    //背景颜色
-	const torch::Tensor& means3D,       //待更新参数（有梯度）
-    const torch::Tensor& colors,        //提前计算好的颜色
-    const torch::Tensor& opacity,       //有梯度
-	const torch::Tensor& scales,        //有梯度
-	const torch::Tensor& rotations,     //有梯度
-	const float scale_modifier,         //感觉应该是多尺度训练
-	const torch::Tensor& cov3D_precomp, //提前计算好的协方差矩阵
-	const torch::Tensor& viewmatrix,    //W2C
-	const torch::Tensor& projmatrix,    //投影矩阵
-	const float tan_fovx,               //半角
+	const torch::Tensor& background,
+	const torch::Tensor& means3D,       //parameters
+    const torch::Tensor& colors,        //parameters
+    const torch::Tensor& opacity,       //parameters
+	const torch::Tensor& scales,        //parameters
+	const torch::Tensor& rotations,     //parameters
+	const float scale_modifier,
+	const torch::Tensor& cov3D_precomp,
+	const torch::Tensor& viewmatrix,    //world to camera
+	const torch::Tensor& projmatrix,    //world to screen
+	const float tan_fovx,
 	const float tan_fovy,
     const int image_height,
     const int image_width,
-	const torch::Tensor& sh,            //有梯度
-	const int degree,                   //当前激活的度数
-	const torch::Tensor& campos,        //相机中心，没有梯度
-	const bool prefiltered,             //手动设置过滤掉的
+	const torch::Tensor& sh,            //parameters
+	const int degree,
+	const torch::Tensor& campos,
+	const bool prefiltered,
 	const bool debug)
 {
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
     AT_ERROR("means3D must have dimensions (num_points, 3)");
   }
   
-  const int P = means3D.size(0);    //点的数量
+  const int P = means3D.size(0);
   const int H = image_height;
   const int W = image_width;
 
@@ -66,15 +66,15 @@ RasterizeGaussiansCUDA(
   auto float_opts = means3D.options().dtype(torch::kFloat32);
 
   torch::Tensor out_color = torch::full({NUM_CHANNELS, H, W}, 0.0, float_opts);
-  torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
+  torch::Tensor radii = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));    //output. for densification
   torch::Tensor depth_map = torch::full({ H, W}, 0.0, float_opts);
   torch::Tensor weight_map = torch::full({ H, W}, 0.0, float_opts);
   
   torch::Device device(torch::kCUDA);
   torch::TensorOptions options(torch::kByte);
-  torch::Tensor geomBuffer = torch::empty({0}, options.device(device));     //输出
-  torch::Tensor binningBuffer = torch::empty({0}, options.device(device));  //输出
-  torch::Tensor imgBuffer = torch::empty({0}, options.device(device));      //输出
+  torch::Tensor geomBuffer = torch::empty({0}, options.device(device));     //output
+  torch::Tensor binningBuffer = torch::empty({0}, options.device(device));  //output
+  torch::Tensor imgBuffer = torch::empty({0}, options.device(device));      //output
   std::function<char*(size_t)> geomFunc = resizeFunctional(geomBuffer);
   std::function<char*(size_t)> binningFunc = resizeFunctional(binningBuffer);
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
@@ -85,10 +85,10 @@ RasterizeGaussiansCUDA(
 	  int M = 0;
 	  if(sh.size(0) != 0)
 	  {
-		M = sh.size(1); //系数的个数
+		M = sh.size(1);
       }
 
-	  rendered = CudaRasterizer::Rasterizer::forward(   //输出
+	  rendered = CudaRasterizer::Rasterizer::forward(
 	    geomFunc,
 		binningFunc,
 		imgFunc,
@@ -109,15 +109,13 @@ RasterizeGaussiansCUDA(
 		tan_fovx,
 		tan_fovy,
 		prefiltered,
-		out_color.contiguous().data<float>(),   //输出
+		out_color.contiguous().data<float>(),
         depth_map.contiguous().data<float>(),
         weight_map.contiguous().data<float>(),
-		radii.contiguous().data<int>(),         //输出
-//        depth_map.contiguous().data<float>(),
+		radii.contiguous().data<int>(),
 		debug);
   }
   return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer,depth_map,weight_map);
-//  return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -158,10 +156,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   }
 
   torch::Tensor dL_dmeans3D = torch::zeros({P, 3}, means3D.options());
-  torch::Tensor dL_dmeans2D = torch::zeros({P, 3}, means3D.options());  //为什么是3维
+  torch::Tensor dL_dmeans2D = torch::zeros({P, 3}, means3D.options());
   torch::Tensor dL_dcolors = torch::zeros({P, NUM_CHANNELS}, means3D.options());
   torch::Tensor dL_ddepths = torch::zeros({P, 1}, means3D.options());
-  torch::Tensor dL_dconic = torch::zeros({P, 2, 2}, means3D.options()); //cov的逆(2维)，中间变量不输出
+  torch::Tensor dL_dconic = torch::zeros({P, 2, 2}, means3D.options());
   torch::Tensor dL_dopacity = torch::zeros({P, 1}, means3D.options());
   torch::Tensor dL_dcov3D = torch::zeros({P, 6}, means3D.options());
   torch::Tensor dL_dsh = torch::zeros({P, M, 3}, means3D.options());
@@ -197,10 +195,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	  dL_dmeans2D.contiguous().data<float>(),
 	  dL_dconic.contiguous().data<float>(),  
 	  dL_dopacity.contiguous().data<float>(),
-	  dL_dcolors.contiguous().data<float>(),    //grad_colors_precomp：与SH作用相同
-      dL_ddepths.contiguous().data<float>(),    //grad_colors_precomp：与SH作用相同
+	  dL_dcolors.contiguous().data<float>(),
+      dL_ddepths.contiguous().data<float>(),
 	  dL_dmeans3D.contiguous().data<float>(),
-	  dL_dcov3D.contiguous().data<float>(),     //grad_cov3Ds_precomp：与S，R相同
+	  dL_dcov3D.contiguous().data<float>(),
 	  dL_dsh.contiguous().data<float>(),
 	  dL_dscales.contiguous().data<float>(),
 	  dL_drotations.contiguous().data<float>(),

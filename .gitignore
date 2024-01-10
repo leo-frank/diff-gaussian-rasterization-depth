@@ -1,4 +1,5 @@
 build/
 diff_gaussian_rasterization_depth.egg-info/
 dist/
-
+cmake-build-debug/
+.idea/

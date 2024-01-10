@@ -50,14 +50,14 @@ __device__ void computeColorFromSH(int idx, int deg, int max_coeffs, const glm::
 	dL_dsh[0] = dRGBdsh0 * dL_dRGB;
 	if (deg > 0)
 	{
-		float dRGBdsh1 = -SH_C1 * y;   //result = result - SH_C1 * y * sh[1] + SH_C1 * z * sh[2] - SH_C1 * x * sh[3];    //每一项都是一个基
+		float dRGBdsh1 = -SH_C1 * y;   //result = result - SH_C1 * y * sh[1] + SH_C1 * z * sh[2] - SH_C1 * x * sh[3];
 		float dRGBdsh2 = SH_C1 * z;
 		float dRGBdsh3 = -SH_C1 * x;
 		dL_dsh[1] = dRGBdsh1 * dL_dRGB;
 		dL_dsh[2] = dRGBdsh2 * dL_dRGB;
 		dL_dsh[3] = dRGBdsh3 * dL_dRGB;
 
-		dRGBdx = -SH_C1 * sh[3];    //上面的xyz是dir的分量，是means[idx]-campos
+		dRGBdx = -SH_C1 * sh[3];
 		dRGBdy = -SH_C1 * sh[1];
 		dRGBdz = SH_C1 * sh[2];
 
@@ -147,16 +147,16 @@ __global__ void computeCov2DCUDA(int P,
 	const float3* means,
 	const int* radii,
 	const float* cov3Ds,
-	const float h_x, float h_y, //focal_x,y,总是变量名不一致
+	const float h_x, float h_y,         //focal_x,y,
 	const float tan_fovx, float tan_fovy,
 	const float* view_matrix,
 	const float* dL_dconics,
     const float* dL_ddepths,
 	float3* dL_dmeans,
-	float* dL_dcov)     //[out]
+	float* dL_dcov)
 {
     ///--------------------computeCov2D---------------------
-	auto idx = cg::this_grid().thread_rank();  //全局一维id
+	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
 		return;
 
@@ -166,9 +166,8 @@ __global__ void computeCov2DCUDA(int P,
 	// Fetch gradients, recompute 2D covariance and relevant 
 	// intermediate forward results needed in the backward.
 	float3 mean = means[idx];
-	float3 t = transformPoint4x3(mean, view_matrix); //转换到相机坐标系
+	float3 t = transformPoint4x3(mean, view_matrix);
 
-    //在pytorch中，一些中间变量是自己存储的，认为写的时候存到ctx中，但是有写变量可以不存，使用计算的方式得到，节省存储空间
 	const float limx = 1.3f * tan_fovx;
 	const float limy = 1.3f * tan_fovy;
 	const float txtz = t.x / t.z;
@@ -176,7 +175,7 @@ __global__ void computeCov2DCUDA(int P,
 	t.x = min(limx, max(-limx, txtz)) * t.z;
 	t.y = min(limy, max(-limy, tytz)) * t.z;
 	
-	const float x_grad_mul = txtz < -limx || txtz > limx ? 0 : 1;   //是否被剪枝
+	const float x_grad_mul = txtz < -limx || txtz > limx ? 0 : 1;
 	const float y_grad_mul = tytz < -limy || tytz > limy ? 0 : 1;
 
 	glm::mat3 J = glm::mat3(h_x / t.z, 0.0f, -(h_x * t.x) / (t.z * t.z),
@@ -203,29 +202,29 @@ __global__ void computeCov2DCUDA(int P,
 	float c = cov2D[1][1] += 0.3f;  //z
 
     ///--------------------compute grad ---------------------
-    float3 dL_dconic = { dL_dconics[4 * idx], dL_dconics[4 * idx + 1], dL_dconics[4 * idx + 3] };  //xyyz，对称，render_back的输出
+    float3 dL_dconic = { dL_dconics[4 * idx], dL_dconics[4 * idx + 1], dL_dconics[4 * idx + 3] };  //xyyz
 
-    float denom = a * c - b * b; //行列式
+    float denom = a * c - b * b;
 	float dL_da = 0, dL_db = 0, dL_dc = 0;
 	float denom2inv = 1.0f / ((denom * denom) + 0.0000001f);
 
     /// [1]dL_dcov3d = dl_dconic * dconic_dcov3d
-    ///           = dl_dconic * (dconic_dcov2d * dcov2d_dcov3d) 括号里变为对各个元素求导数，即论文中 dΣ'/dΣ
+    ///           = dl_dconic * (dconic_dcov2d * dcov2d_dcov3d) , dΣ'/dΣ in paper
 	if (denom2inv != 0)
 	{
 		// Gradients of loss w.r.t. entries of 2D covariance matrix,
 		// given gradients of loss w.r.t. conic matrix (inverse covariance matrix).
 		// e.g., dL / da = dL / d_conic_a * d_conic_a / d_a
         // "conic = { c / denom, - b / denom, - b / denom, a / denom };"
-        // "cov_2d = {a, b, b, c}"(这个是在直接去掉最后一列和行，这部分可以认为是0)
-		dL_da = denom2inv * (-c * c * dL_dconic.x + 2 * b * c * dL_dconic.y + (denom - a * c) * dL_dconic.z);  //LOSS是标量，各个部分都参与计算，所以对矩阵中各个元素分别求导在相加
-		dL_dc = denom2inv * (-a * a * dL_dconic.z + 2 * a * b * dL_dconic.y + (denom - a * c) * dL_dconic.x);   // 乘2是因为对称矩阵，实际有两个b
+        // "cov_2d = {a, b, b, c}"
+		dL_da = denom2inv * (-c * c * dL_dconic.x + 2 * b * c * dL_dconic.y + (denom - a * c) * dL_dconic.z);
+		dL_dc = denom2inv * (-a * a * dL_dconic.z + 2 * a * b * dL_dconic.y + (denom - a * c) * dL_dconic.x);   // Multiplying by 2 is because of a symmetric matrix, where there are actually two b
 		dL_db = denom2inv * 2 * (b * c * dL_dconic.x - (denom + 2 * b * b) * dL_dconic.y + a * b * dL_dconic.z);
 
 		// Gradients of loss L w.r.t. each 3D covariance matrix (Vrk) entry, 
 		// given gradients w.r.t. 2D covariance matrix (diagonal).
 		// cov2D = transpose(T) * transpose(Vrk) * T;
-		dL_dcov[6 * idx + 0] = (T[0][0] * T[0][0] * dL_da + T[0][0] * T[1][0] * dL_db + T[1][0] * T[1][0] * dL_dc); //dl_da*dΣ_dΣ00[0] + dl_db*dΣ_dΣ00[1,2] + dl_dc*dΣ_dΣ00[3]     //dL_db已经乘2了
+		dL_dcov[6 * idx + 0] = (T[0][0] * T[0][0] * dL_da + T[0][0] * T[1][0] * dL_db + T[1][0] * T[1][0] * dL_dc); //dl_da*dΣ_dΣ00[0] + dl_db*dΣ_dΣ00[1,2] + dl_dc*dΣ_dΣ00[3] , dl_db has already multiplied by 2
 		dL_dcov[6 * idx + 3] = (T[0][1] * T[0][1] * dL_da + T[0][1] * T[1][1] * dL_db + T[1][1] * T[1][1] * dL_dc); //dl_da*dΣ_dΣ11 + dl_db*dΣ_dΣ11 + dl_dc*dΣ_dΣ11
 		dL_dcov[6 * idx + 5] = (T[0][2] * T[0][2] * dL_da + T[0][2] * T[1][2] * dL_db + T[1][2] * T[1][2] * dL_dc); //dl_da*dΣ_dΣ22 + dl_db*dΣ_dΣ22 + dl_dc*dΣ_dΣ22
 
@@ -243,8 +242,8 @@ __global__ void computeCov2DCUDA(int P,
 			dL_dcov[6 * idx + i] = 0;
 	}
 
-	// Gradients of loss w.r.t. upper 2x3 portion of intermediate matrix T  //之所以取2x3是因为 2x3 * 3x3 *3x2 = 2x2（conic）
-	// cov2D = transpose(T) * transpose(Vrk) * T;   //直接乘后计算，主要是注意对应dL_da，dL_db，dL_dc
+	// Gradients of loss w.r.t. upper 2x3 portion of intermediate matrix T
+	// cov2D = transpose(T) * transpose(Vrk) * T;
 	float dL_dT00 = 2 * (T[0][0] * Vrk[0][0] + T[0][1] * Vrk[0][1] + T[0][2] * Vrk[0][2]) * dL_da +
 		(T[1][0] * Vrk[0][0] + T[1][1] * Vrk[0][1] + T[1][2] * Vrk[0][2]) * dL_db;
 	float dL_dT01 = 2 * (T[0][0] * Vrk[1][0] + T[0][1] * Vrk[1][1] + T[0][2] * Vrk[1][2]) * dL_da +
@@ -274,7 +273,7 @@ __global__ void computeCov2DCUDA(int P,
 	float dL_dty = y_grad_mul * -h_y * tz2 * dL_dJ12;
 	float dL_dtz = -h_x * tz2 * dL_dJ00 - h_y * tz2 * dL_dJ11 + (2 * h_x * t.x) * tz3 * dL_dJ02 + (2 * h_y * t.y) * tz3 * dL_dJ12;
 
-    dL_dtz += dL_ddepths[idx];  //todo
+    dL_dtz += dL_ddepths[idx];  //Partial derivatives from depth
 	// Account for transformation of mean to t
 	// t = transformPoint4x3(mean, view_matrix);
 	float3 dL_dmean = transformVec4x3Transpose({ dL_dtx, dL_dty, dL_dtz }, view_matrix);
@@ -312,8 +311,8 @@ __device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const gl
 
 	const float* dL_dcov3D = dL_dcov3Ds + 6 * idx;
 
-	glm::vec3 dunc(dL_dcov3D[0], dL_dcov3D[3], dL_dcov3D[5]);   //对角
-	glm::vec3 ounc = 0.5f * glm::vec3(dL_dcov3D[1], dL_dcov3D[2], dL_dcov3D[4]);    //计算dL_dcov3D的时候乘了2，这里相当与分开
+	glm::vec3 dunc(dL_dcov3D[0], dL_dcov3D[3], dL_dcov3D[5]);
+	glm::vec3 ounc = 0.5f * glm::vec3(dL_dcov3D[1], dL_dcov3D[2], dL_dcov3D[4]);    // multiplied by 2 when calculated dL_dcov3D, so multiply by 0.5 here
 
 	// Convert per-element covariance loss gradients to matrix form
 	glm::mat3 dL_dSigma = glm::mat3(
@@ -323,7 +322,7 @@ __device__ void computeCov3D(int idx, const glm::vec3 scale, float mod, const gl
 	);
 
 	// Compute loss gradient w.r.t. matrix M
-	// dSigma_dM = 2 * M    //这里不够严谨，可能有问题，有时间可以自己计算一下
+	// dSigma_dM = 2 * M    //There's a lack of rigor here. There could be a problem
 	glm::mat3 dL_dM = 2.0f * M * dL_dSigma;
 
 	glm::mat3 Rt = glm::transpose(R);
@@ -366,27 +365,27 @@ __global__ void preprocessCUDA(
 	const float scale_modifier,
 	const float* proj,          //full_proj_transform
 	const glm::vec3* campos,
-	const float3* dL_dmean2D,   //[in from render]
-	glm::vec3* dL_dmeans,       //[in(computeCov2DCUDA)and out(mean3d2mean2d,SH_dir)]
-	float* dL_dcolor,           //[in from render]
-	float* dL_dcov3D,           //[in from computeCov2DCUDA]
-	float* dL_dsh,              //[out]
-	glm::vec3* dL_dscale,       //[out]
-	glm::vec4* dL_drot)         //[out]
+	const float3* dL_dmean2D,   //[in, form BackWARD::render]
+	glm::vec3* dL_dmeans,       //[in(computeCov2DCUDA)and output(mean3d2mean2d,SH_dir)]
+	float* dL_dcolor,           //[in, form BackWARD::render]
+	float* dL_dcov3D,           //[in, from computeCov2DCUDA]
+	float* dL_dsh,              //[output]
+	glm::vec3* dL_dscale,       //[output]
+	glm::vec4* dL_drot)         //[output]
 {
-	auto idx = cg::this_grid().thread_rank();   //全局id,对应GS
+	auto idx = cg::this_grid().thread_rank();   //Global ID, corresponding to GS
 	if (idx >= P || !(radii[idx] > 0))
 		return;
 
 	float3 m = means[idx];
 
 	// Taking care of gradients from the screenspace points
-	float4 m_hom = transformPoint4x4(m, proj);  //世界坐标到NDC下的齐次
+	float4 m_hom = transformPoint4x4(m, proj);
 	float m_w = 1.0f / (m_hom.w + 0.0000001f);
 
 	// Compute loss gradient w.r.t. 3D means due to gradients of 2D means
 	// from rendering procedure
-	glm::vec3 dL_dmean;     //mean3d主要用来计算mean2d，dL_dmean2D已经进行了ndc2Pix
+	glm::vec3 dL_dmean;
 	float mul1 = (proj[0] * m.x + proj[4] * m.y + proj[8] * m.z + proj[12]) * m_w * m_w;
 	float mul2 = (proj[1] * m.x + proj[5] * m.y + proj[9] * m.z + proj[13]) * m_w * m_w;
 	dL_dmean.x = (proj[0] * m_w - proj[3] * mul1) * dL_dmean2D[idx].x + (proj[1] * m_w - proj[3] * mul2) * dL_dmean2D[idx].y;
@@ -416,83 +415,80 @@ renderCUDA(
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image,
 	const float4* __restrict__ conic_opacity,
-	const float* __restrict__ colors,   //可以是SH计算得到的geomState.rgb，也可以是pre computed，【高斯的颜色】
-    const float* __restrict__ depths,    //todo
+	const float* __restrict__ colors,
+    const float* __restrict__ depths,
 	const float* __restrict__ final_Ts,
-    const float* __restrict__ final_Ws, //todo
-    const float* __restrict__ final_Ds, //todo
+    const float* __restrict__ final_Ws,
+    const float* __restrict__ final_Ds,
 	const uint32_t* __restrict__ n_contrib,
-	const float* __restrict__ dL_dpixels,   //[in]dL_dout_color
-    const float* __restrict__ dL_dDs,    //[in]dL_dout_depth    //todo
-	float3* __restrict__ dL_dmean2D,    //[out]
-	float4* __restrict__ dL_dconic2D,   //[out]
-	float* __restrict__ dL_dopacity,    //[out]
+	const float* __restrict__ dL_dpixels,
+    const float* __restrict__ dL_dDs,
+	float3* __restrict__ dL_dmean2D,
+	float4* __restrict__ dL_dconic2D,
+	float* __restrict__ dL_dopacity,
 	float* __restrict__ dL_dcolors,
-    float* __restrict__ dL_ddepths        //[out]     //todo
-
-    )     //[out]
+    float* __restrict__ dL_ddepths
+    )
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
-	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;  //一行有几个tile
-	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };  //当前block最小像素
+	const uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
+	const uint2 pix_min = { block.group_index().x * BLOCK_X, block.group_index().y * BLOCK_Y };
 
-	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };     //当前block最小像素
-	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y }; //当前线程对应的pix
-	const uint32_t pix_id = W * pix.y + pix.x;  //一维id
+	const uint2 pix_max = { min(pix_min.x + BLOCK_X, W), min(pix_min.y + BLOCK_Y , H) };
+	const uint2 pix = { pix_min.x + block.thread_index().x, pix_min.y + block.thread_index().y };
+	const uint32_t pix_id = W * pix.y + pix.x;
 	const float2 pixf = { (float)pix.x, (float)pix.y };
 
 	const bool inside = pix.x < W&& pix.y < H;
-	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];  //当前tile的range
+	const uint2 range = ranges[block.group_index().y * horizontal_blocks + block.group_index().x];
 
 	const int rounds = ((range.y - range.x + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
 	bool done = !inside;
 	int toDo = range.y - range.x;
 
-    //每次BLOCK_SIZE次渲染
+
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
-	__shared__ float collected_colors[C * BLOCK_SIZE];  //当前block内全部像素颜色
-    __shared__ float collected_depths[BLOCK_SIZE];  //当前block内全部像素颜色
+	__shared__ float collected_colors[C * BLOCK_SIZE];
+    __shared__ float collected_depths[BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
 	const float T_final = inside ? final_Ts[pix_id] : 0;
 	float T = T_final;
 
-    //todo
-    const float W_final = inside ? final_Ws[pix_id] : 0;
-    float Wei = W_final;    //该像素全部的
+    const float Wei = inside ? final_Ws[pix_id] : 0;
+//    float Wei = W_final;
 
-    //todo
-    const float D_final = inside ? final_Ds[pix_id] : 0;
-    float Dep = D_final;    //该像素全部的
+    const float Dep = inside ? final_Ds[pix_id] : 0;
+//    float Dep = D_final;
 
 	// We start from the back. The ID of the last contributing
 	// Gaussian is known from each pixel from the forward.
 	uint32_t contributor = toDo;
 	const int last_contributor = inside ? n_contrib[pix_id] : 0;
 
-	float accum_rec[C] = { 0 };  //i+1到n
-	float dL_dpixel[C];  //三个通道单独处理，loss对于每个像素的
+	float accum_rec[C] = { 0 };  //i+1 to N(The number of GS used to render this pixel)
+	float dL_dpixel[C];
     float dL_dD;
-    float accum_wei = 0;  //i+1到n
-    float accum_dep = 0;  //i+1到n
+    float accum_wei = 0;  //i+1 to N
+    float accum_dep = 0;  //i+1 to N
 	if (inside)
 		for (int i = 0; i < C; i++)
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
         dL_dD = dL_dDs[pix_id];
 
-	float last_alpha = 0;   //记当前为i,则last表示i+1
+	float last_alpha = 0;   //the current GS is i, last indicates i+1
 	float last_color[C] = { 0 };
     float last_depth = 0;
 
 	// Gradient of pixel coordinate w.r.t. normalized 
 	// screen-space viewport corrdinates (-1 to 1)
-	const float ddelx_dx = 0.5 * W;     // d = { xy.x - pixf.x, xy.y - pixf.y };应该是单位转换，xy.x的一个单位对应0.5W
-	const float ddely_dy = 0.5 * H;     // 这个实际是NDC2pixel，提前到了这里
+	const float ddelx_dx = 0.5 * W;     // d = { xy.x - pixf.x, xy.y - pixf.y }
+	const float ddely_dy = 0.5 * H;     // for NDC2pixel
 
 	// Traverse all Gaussians
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -503,13 +499,13 @@ renderCUDA(
 		const int progress = i * BLOCK_SIZE + block.thread_rank();
 		if (range.x + progress < range.y)
 		{
-			const int coll_id = point_list[range.y - progress - 1];     //从最后一个开始
+			const int coll_id = point_list[range.y - progress - 1];     //start in the BACK
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
             collected_depths[block.thread_rank()] = depths[coll_id];
             for (int i = 0; i < C; i++)
-				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];   //高斯的颜色RGB
+				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
 		}
 		block.sync();
 
@@ -520,7 +516,7 @@ renderCUDA(
 			// is behind the last contributor for this pixel.
 			contributor--;
 			if (contributor >= last_contributor)
-				continue; //有些高斯没有参与计算
+				continue;
 
 			// Compute blending values, as before.
 			const float2 xy = collected_xy[j];
@@ -535,42 +531,41 @@ renderCUDA(
 			if (alpha < 1.0f / 255.0f)
 				continue;
 
-			T = T / (1.f - alpha);  //这里就是反着计算的原因
-			const float dchannel_dcolor = alpha * T;     ///三个通道系数一样，【每个高斯】的特征颜色的导数
+			T = T / (1.f - alpha);
+			const float dchannel_dcolor = alpha * T;
             const float dD_ddepth = alpha *T/Wei;
-
 
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
 			// pair).
-			float dL_dalpha = 0.0f;     ///每个GS的
+			float dL_dalpha = 0.0f;
 			const int global_id = collected_id[j];  //GS_id
 
-            //todo
+            //Partial derivative of depth loss with respect to each Gaussian depth
             atomicAdd(&(dL_ddepths[global_id]), dD_ddepth * dL_dD);
 
 			for (int ch = 0; ch < C; ch++)
 			{
-				const float c = collected_colors[ch * BLOCK_SIZE + j];  //当前GS的颜色（从后往前，因此也是当前最后）
+				const float c = collected_colors[ch * BLOCK_SIZE + j];  //i
 				// Update last color (to be used in the next iteration)
-				accum_rec[ch] = last_alpha * last_color[ch] + (1.f - last_alpha) * accum_rec[ch];  //sum(f_j*alp_j*T_n/(1-alp_j)) , (i+1 to n)
-				last_color[ch] = c; //后一个
+				accum_rec[ch] = last_alpha * last_color[ch] + (1.f - last_alpha) * accum_rec[ch];  // i+1 to N
+				last_color[ch] = c; //i+1
 
-				const float dL_dchannel = dL_dpixel[ch];       /// LOSS对通道颜色的梯度[累计颜色]
-				dL_dalpha += (c - accum_rec[ch]) * dL_dchannel; ///三个通道，所以加三个。是怎么推导出来的？？？??
+				const float dL_dchannel = dL_dpixel[ch];
+				dL_dalpha += (c - accum_rec[ch]) * dL_dchannel;
 				// Update the gradients w.r.t. color of the Gaussian. 
 				// Atomic, since this pixel is just one of potentially
 				// many that were affected by this Gaussian.
 				atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
 			}
 
-            {   ////+dW_dalpha
+            {   //+dW_dalpha
                 const float dD_dW = -Dep/Wei;
                 accum_wei = last_alpha + (1.f - last_alpha) * accum_wei;
                 dL_dalpha += (1.f - accum_wei) * dL_dD * dD_dW;
             }
 
-            {   ////+dsum_dalpha
+            {   //+dsum_dalpha
                 const float dD_dsum = 1.f/Wei;
                 const float d = collected_depths[j];
                 accum_dep = last_alpha * last_depth + (1.f - last_alpha) * accum_dep;
@@ -578,8 +573,7 @@ renderCUDA(
                 dL_dalpha += (d - accum_dep) * dL_dD * dD_dsum;
             }
 
-			dL_dalpha *= T;  //这里为alpha_{i}和T_{i}，T_{i}对应 alpha_{1}--alpha_{i-1}
-            /// dchannel_dalpha_i = T_i*c_i - T_i * accum_rec_i, 这里注意alpha_i有多项，出现在T_{i+1}到T_{n}
+			dL_dalpha *= T;
 
 			// Update last alpha (to be used in the next iteration)
 			last_alpha = alpha;
@@ -605,11 +599,11 @@ renderCUDA(
 
 			// Update gradients w.r.t. 2D covariance (2x2 matrix, symmetric)
 			atomicAdd(&dL_dconic2D[global_id].x, -0.5f * gdx * d.x * dL_dG);
-			atomicAdd(&dL_dconic2D[global_id].y, -0.5f * gdx * d.y * dL_dG);    // 对称，y与z值相同,对应con.y
-			atomicAdd(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);    // 对应con.z
+			atomicAdd(&dL_dconic2D[global_id].y, -0.5f * gdx * d.y * dL_dG);    // Corresponds to con_o.y
+			atomicAdd(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);    // Corresponds to con_o.z
 
 			// Update gradients w.r.t. opacity of the Gaussian
-			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);        //对应con_o.w
+			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);        //Corresponds to con_o.w
 		}
 	}
 }
@@ -631,13 +625,13 @@ void BACKWARD::preprocess(
 	const glm::vec3* campos,
 	const float3* dL_dmean2D,   //[in]
 	const float* dL_dconic,     //[in]
-	glm::vec3* dL_dmean3D,      //[out]
+	glm::vec3* dL_dmean3D,      //[output]
 	float* dL_dcolor,           //[in]
-    float* dL_ddepths,           //[in]
-	float* dL_dcov3D,           //[out]
-	float* dL_dsh,              //[out]
-	glm::vec3* dL_dscale,       //[out]
-	glm::vec4* dL_drot)         //[out]
+    float* dL_ddepths,          //[in]
+	float* dL_dcov3D,           //[output]
+	float* dL_dsh,              //[output]
+	glm::vec3* dL_dscale,       //[output]
+	glm::vec4* dL_drot)         //[output]
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
 	// Somewhat long, thus it is its own kernel rather than being part of 
@@ -654,9 +648,9 @@ void BACKWARD::preprocess(
 		tan_fovy,
 		viewmatrix,
 		dL_dconic,
-        dL_ddepths,              //[in from render]
-		(float3*)dL_dmean3D,    //[out],一部分，这部分是COV3D 到cov2d到covnic
-		dL_dcov3D);             //[out]
+        dL_ddepths,             //[in, from BackWARD::render]
+		(float3*)dL_dmean3D,    //[output], COV3D to cov2d to covnic
+		dL_dcov3D);             //[output]
 
 	// Propagate gradients for remaining steps: finish 3D mean gradients,
 	// propagate color gradients to SH (if desireD), propagate 3D covariance
@@ -672,19 +666,18 @@ void BACKWARD::preprocess(
 		scale_modifier,
 		projmatrix,
 		campos,
-		(float3*)dL_dmean2D,    //[in form render]
-		(glm::vec3*)dL_dmean3D, //[in and out,part form computeCov2DCUDA]
-		dL_dcolor,              //[in from render]
-		dL_dcov3D,              //[in from computeCov2DCUDA]
-		dL_dsh,                 //[out]
-		dL_dscale,              //[out]
-		dL_drot);               //[out]
+		(float3*)dL_dmean2D,    //[in, form  from BackWARD::render]
+		(glm::vec3*)dL_dmean3D, //[in(computeCov2DCUDA)and output(mean3d to mean2d,SH_dir)]
+		dL_dcolor,              //[in, from BackWARD::render]
+		dL_dcov3D,              //[in, from computeCov2DCUDA]
+		dL_dsh,                 //[output]
+		dL_dscale,              //[output]
+		dL_drot);               //[output]
 }
 
-//与前项传播顺序相反，只有render和preprocess这两个过程计算梯度
 
 void BACKWARD::render(
-	const dim3 grid,    //tile_grid
+	const dim3 grid,                //tile_grid
     const dim3 block,
 	const uint2* ranges,
 	const uint32_t* point_list,
@@ -692,19 +685,19 @@ void BACKWARD::render(
 	const float* bg_color,
 	const float2* means2D,          //geomState.means2D,
 	const float4* conic_opacity,    //geomState.conic_opacity,
-	const float* colors,            //可以是SH计算得到的geomState.rgb，也可以是pre computed，【高斯的颜色】
-    const float* depths,            //正向传播中计算的每个高斯的深度
+	const float* colors,            //color of each GS
+    const float* depths,            //depth of each GS
 	const float* final_Ts,          //imgState.accum_alpha
-    const float* final_Ws,          //imgState.accum_weight【增加】
-    const float* final_Ds,          //imgState.accum_depths【增加】
-	const uint32_t* n_contrib,      //imgState.n_contrib,
-	const float* dL_dpixels,
-    const float* dL_dDs,
-	float3* dL_dmean2D,     //这个计算高斯概率--> power
-	float4* dL_dconic2D,    //这个计算高斯概率--> power
-	float* dL_dopacity,     //用来计算alpha
-	float* dL_dcolors,       //對顏色
-    float* dL_ddepths
+    const float* final_Ws,          //imgState.accum_weight
+    const float* final_Ds,          //imgState.accum_depths
+	const uint32_t* n_contrib,      //imgState.n_contrib
+	const float* dL_dpixels,        //[in], Calculated by pytorch
+    const float* dL_dDs,            //[in], Calculated by pytorch
+	float3* dL_dmean2D,
+	float4* dL_dconic2D,
+	float* dL_dopacity,
+	float* dL_dcolors,              //[output], partial derivatives of each GS color
+    float* dL_ddepths               //[output], partial derivatives of each GS depth
     )
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> >(
@@ -715,17 +708,17 @@ void BACKWARD::render(
 		means2D,
 		conic_opacity,
 		colors,
-        depths,          //[+]
+        depths,
 		final_Ts,
-        final_Ws,        //[+]
-        final_Ds,        //[+]
+        final_Ws,
+        final_Ds,
 		n_contrib,
 		dL_dpixels,
-        dL_dDs,          //[+]
+        dL_dDs,
 		dL_dmean2D,
 		dL_dconic2D,
 		dL_dopacity,
 		dL_dcolors,
-        dL_ddepths      //[+]
+        dL_ddepths
 		);
 }

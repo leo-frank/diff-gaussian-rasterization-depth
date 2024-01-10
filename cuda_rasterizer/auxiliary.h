@@ -46,7 +46,7 @@ __forceinline__ __device__ float ndc2Pix(float v, int S)
 __forceinline__ __device__ void getRect(const float2 p, int max_radius, uint2& rect_min, uint2& rect_max, dim3 grid)
 {
 	rect_min = {
-		min(grid.x, max((int)0, (int)((p.x - max_radius) / BLOCK_X))),      //里层max保证index不小于0，外层min保证不超出范围
+		min(grid.x, max((int)0, (int)((p.x - max_radius) / BLOCK_X))),
 		min(grid.y, max((int)0, (int)((p.y - max_radius) / BLOCK_Y)))
 	};
 	rect_max = {
@@ -107,7 +107,7 @@ __forceinline__ __device__ float dnormvdz(float3 v, float3 dv)
 __forceinline__ __device__ float3 dnormvdv(float3 v, float3 dv)
 {
 	float sum2 = v.x * v.x + v.y * v.y + v.z * v.z;
-	float invsum32 = 1.0f / sqrt(sum2 * sum2 * sum2);   //3/2次方
+	float invsum32 = 1.0f / sqrt(sum2 * sum2 * sum2);
 
 	float3 dnormvdv;
 	dnormvdv.x = ((+sum2 - v.x * v.x) * dv.x - v.y * v.x * dv.y - v.z * v.x * dv.z) * invsum32;
@@ -137,21 +137,21 @@ __forceinline__ __device__ float sigmoid(float x)
 }
 
 __forceinline__ __device__ bool in_frustum(int idx,
-	const float* orig_points,   //高斯原点
+	const float* orig_points,
 	const float* viewmatrix,    //world_view_transform
-	const float* projmatrix,    //full_proj_transform（包含了投影与坐标系转换）【投影矩阵：物体从相机坐标系到 NDC 坐标系的过程，用一个矩阵串联起来】
+	const float* projmatrix,    //full_proj_transform
 	bool prefiltered,
 	float3& p_view)
 {
 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
 
 	// Bring points to screen space
-	float4 p_hom = transformPoint4x4(p_orig, projmatrix);   //？？？？
+	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
-	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };    //齐次坐标转欧式坐标
-	p_view = transformPoint4x3(p_orig, viewmatrix); //转为相机坐标系，直接到欧式？
+	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+	p_view = transformPoint4x3(p_orig, viewmatrix);
 
-	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3))) ???
+	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
 	{
 		if (prefiltered)
 		{

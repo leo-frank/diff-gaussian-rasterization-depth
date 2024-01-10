@@ -96,7 +96,7 @@ __global__ void duplicateWithKeys(
 		// and the value is the ID of the Gaussian. Sorting the values 
 		// with this key yields Gaussian IDs in a list, such that they
 		// are first sorted by tile and then by depth. 
-		for (int y = rect_min.y; y < rect_max.y; y++)   //每个tail都要处理，每个tail内的像素深度值认为是一样的
+		for (int y = rect_min.y; y < rect_max.y; y++)
 		{
 			for (int x = rect_min.x; x < rect_max.x; x++)
 			{
@@ -159,7 +159,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.depths, P, 128);
 	obtain(chunk, geom.clamped, P * 3, 128);
 	obtain(chunk, geom.internal_radii, P, 128);
-	obtain(chunk, geom.means2D, P, 128); //为什么只有一个
+	obtain(chunk, geom.means2D, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
 	obtain(chunk, geom.conic_opacity, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
@@ -174,8 +174,8 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 {
 	ImageState img;
 	obtain(chunk, img.accum_alpha, N, 128);
-//    obtain(chunk, img.accum_weight, N, 128); //权重图
-//    obtain(chunk, img.accum_depth, N, 128); //深度图
+//    obtain(chunk, img.accum_weight, N, 128);
+//    obtain(chunk, img.accum_depth, N, 128);
 	obtain(chunk, img.n_contrib, N, 128);
 	obtain(chunk, img.ranges, N, 128);
 	return img;
@@ -199,10 +199,10 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
 int CudaRasterizer::Rasterizer::forward(
-	std::function<char* (size_t)> geometryBuffer,   //对应GeometryState
+	std::function<char* (size_t)> geometryBuffer,   //GeometryState
 	std::function<char* (size_t)> binningBuffer,    //BinningState
 	std::function<char* (size_t)> imageBuffer,      //ImageState
-	const int P, int D, int M,  //数量：P(点个数),D(激活degree的个数),M(sh.size(1))
+	const int P, int D, int M,  //P(GS num),D(degree),M(sh.size(1))
 	const float* background,
 	const int width, int height,
 	const float* means3D,
@@ -218,10 +218,10 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* cam_pos,
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
-	float* out_color,   //输出
+	float* out_color,
     float* depth_map,
     float* weight_map,
-	int* radii,         //输出,高斯的投影半径
+	int* radii,         //output. for densification
     bool debug)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -236,9 +236,8 @@ int CudaRasterizer::Rasterizer::forward(
 		radii = geomState.internal_radii;
 	}
 
-    //(width + BLOCK_X - 1) / BLOCK_X ,这个除法加向下取整操作主要是对边界处理，溢出不够BLOCK_X时多申请一个block
-	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);   //把整个像素平面分为tile，每个tile对应一个block
-	dim3 block(BLOCK_X, BLOCK_Y, 1);    //每个block对应内部的像素个数
+	dim3 tile_grid((width + BLOCK_X - 1) / BLOCK_X, (height + BLOCK_Y - 1) / BLOCK_Y, 1);   //Divide pixel plane into tiles, each tile corresponding a block
+	dim3 block(BLOCK_X, BLOCK_Y, 1);
 
 	// Dynamically resize image-based auxiliary buffers during training
 	size_t img_chunk_size = required<ImageState>(width * height);
@@ -259,7 +258,7 @@ int CudaRasterizer::Rasterizer::forward(
 		(glm::vec4*)rotations,
 		opacities,
 		shs,
-		geomState.clamped,  //标记颜色小于0的部分
+		geomState.clamped,  //Mark Gaussian with color less than 0
 		cov3D_precomp,
 		colors_precomp,
 		viewmatrix, projmatrix,
@@ -267,14 +266,14 @@ int CudaRasterizer::Rasterizer::forward(
 		width, height,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
-		radii,  //输出，该高斯在当前图像上的半径
-		geomState.means2D,  //像素坐标
-		geomState.depths,   //深度
-		geomState.cov3D,    //3d协方差
-		geomState.rgb,      //颜色
-		geomState.conic_opacity,    //2d协方差逆+opa
+		radii,
+		geomState.means2D,
+		geomState.depths,
+		geomState.cov3D,
+		geomState.rgb,
+		geomState.conic_opacity,    //2d-cov(inverse)+opa
 		tile_grid,
-		geomState.tiles_touched,    //覆盖到的瓦片数量
+		geomState.tiles_touched,
 		prefiltered
 	), debug)
 
@@ -286,7 +285,7 @@ int CudaRasterizer::Rasterizer::forward(
 	int num_rendered;
 	CHECK_CUDA(cudaMemcpy(&num_rendered, geomState.point_offsets + P - 1, sizeof(int), cudaMemcpyDeviceToHost), debug);
 
-	size_t binning_chunk_size = required<BinningState>(num_rendered);   //辅助排序
+	size_t binning_chunk_size = required<BinningState>(num_rendered);
 	char* binning_chunkptr = binningBuffer(binning_chunk_size);
 	BinningState binningState = BinningState::fromChunk(binning_chunkptr, num_rendered);
 
@@ -297,8 +296,8 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.means2D,
 		geomState.depths,
 		geomState.point_offsets,
-		binningState.point_list_keys_unsorted,  //key : [tail_id | depth]
-		binningState.point_list_unsorted,       //value : gaussian id
+		binningState.point_list_keys_unsorted,      //key : [tail_id | depth]
+		binningState.point_list_unsorted,           //value : gaussian id
 		radii,
 		tile_grid)
 	CHECK_CUDA(, debug)
@@ -329,18 +328,18 @@ int CudaRasterizer::Rasterizer::forward(
 		tile_grid,
         block,
 		imgState.ranges,
-		binningState.point_list,    //排序后的gaussian id
+		binningState.point_list,    //Sorted GS ID
 		width, height,
 		geomState.means2D,
 		feature_ptr,
 		geomState.conic_opacity,
-        geomState.depths,       //为了深度图计算，与渲染无关，顺序已经在process中计算好了
-		imgState.accum_alpha,   //累计[out],final_T
-		imgState.n_contrib,     //该像素对应高斯数量[out]
+        geomState.depths,
+		imgState.accum_alpha,   //final_T
+		imgState.n_contrib,
 		background,
-		out_color,          //[out]
-        depth_map,          //[out]
-        weight_map),        //[out]
+		out_color,
+        depth_map,
+        weight_map),
                debug)
 
 	return num_rendered;
@@ -369,15 +368,15 @@ void CudaRasterizer::Rasterizer::backward(
 	char* geom_buffer,
 	char* binning_buffer,
 	char* img_buffer,
-	const float* dL_dpix,   //dL_dout_color [in],torch给出的
-    const float* dL_dDs,   //dL_dout_color [in],torch给出的
+	const float* dL_dpix,   //dL_dout_color [in], Calculated by pytorch
+    const float* dL_dDs,    //dL_dout_depth [in], Calculated by pytorch
 	float* dL_dmean2D,
-	float* dL_dconic,       //逆2D cov + OPAC
+	float* dL_dconic,
 	float* dL_dopacity,
-	float* dL_dcolor,       //color_precomp[out]
-    float* dL_ddepths,       //[out]
+	float* dL_dcolor,
+    float* dL_ddepths,
 	float* dL_dmean3D,
-	float* dL_dcov3D,       //cov3D_precomp
+	float* dL_dcov3D,
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
@@ -402,8 +401,8 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
-    const float* depths = (colors_precomp != nullptr) ? colors_precomp : geomState.depths;  //todo
-    //与前项传播顺序相反，只有render和preprocess这两个过程计算梯度
+    const float* depths = (colors_precomp != nullptr) ? colors_precomp : geomState.depths;
+
 	CHECK_CUDA(BACKWARD::render(
 		tile_grid,
 		block,
@@ -413,20 +412,20 @@ void CudaRasterizer::Rasterizer::backward(
 		background,
 		geomState.means2D,
 		geomState.conic_opacity,
-		color_ptr,      //GS 的颜色
-        depths,         //GS 的深度[+]
+		color_ptr,      //color of each GS
+        depths,         //depth of each GS
 		imgState.accum_alpha,
-        accum_weight,  //[+]该像素累计权重，这个实际上就是权重图，也可以直接使用正向传播计算的权重图
-        accum_depth,  //[+]该像素累计深度,这个实际上就是深度图，也可以直接使用正向传播计算的深度图
+        accum_weight,   //weight map
+        accum_depth,    //depth map
 		imgState.n_contrib,
 		dL_dpix,
-        dL_dDs,         //[+]
+        dL_dDs,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
-		dL_dcolor,
-        dL_ddepths      //[+]
-        ), debug)  //color_precomp
+		dL_dcolor,      //partial derivatives of each GS color
+        dL_ddepths      //partial derivatives of each GS depth
+        ), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
@@ -436,7 +435,7 @@ void CudaRasterizer::Rasterizer::backward(
 		(float3*)means3D,
 		radii,
 		shs,
-		geomState.clamped,  //颜色小于0直接设置为0
+		geomState.clamped,     //Set the corresponding gradient to 0
 		(glm::vec3*)scales,
 		(glm::vec4*)rotations,
 		scale_modifier,
@@ -445,14 +444,14 @@ void CudaRasterizer::Rasterizer::backward(
 		projmatrix,
 		focal_x, focal_y,
 		tan_fovx, tan_fovy,
-		(glm::vec3*)campos,     //相机中心
-		(float3*)dL_dmean2D,    //render的输出
-		dL_dconic,              //render的输出
-		(glm::vec3*)dL_dmean3D, //[out]
-		dL_dcolor,      //render的输出
-        dL_ddepths,     //render的输出
-		dL_dcov3D,      //[out]
-		dL_dsh,         //[out]
-		(glm::vec3*)dL_dscale,  //[out]
-		(glm::vec4*)dL_drot), debug)    //[out]
+		(glm::vec3*)campos,
+		(float3*)dL_dmean2D,    //output of BackWARD::render
+		dL_dconic,              //output of BackWARD::render
+		(glm::vec3*)dL_dmean3D, //output
+		dL_dcolor,              //output of BackWARD::render
+        dL_ddepths,             //output of BackWARD::render
+		dL_dcov3D,              //output
+		dL_dsh,                 //output
+		(glm::vec3*)dL_dscale,  //output
+		(glm::vec4*)dL_drot), debug)    //output
 }
