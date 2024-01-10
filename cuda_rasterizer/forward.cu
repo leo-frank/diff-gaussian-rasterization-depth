@@ -385,8 +385,9 @@ renderCUDA(
 		n_contrib[pix_id] = last_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
+		Wei += 1e-6;
         depth_map[pix_id]= Dep/Wei;
-        weight_map[pix_id] =Wei;
+        weight_map[pix_id] = Wei;
 	}
 }
 
