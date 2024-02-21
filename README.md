@@ -1,8 +1,8 @@
 # Differential Gaussian Rasterization with Depth Forward and Backward Functionality
 
-An extension of the rasterization engine for the paper "3D Gaussian Splatting for Real-Time Rendering of Radiance Fields". If you can make use of it in your own research, please be so kind to cite us.
+An extension of the rasterization engine for the paper "3D Gaussian Splatting for Real-Time Rendering of Radiance Fields". 
 
-We make two contributions: Depth forward and backward. We have verified its correctness on real datasets.
+**We make two contributions: Depth forward and backward. We have verified its correctness on real datasets.**
 
 <section class="section" id="BibTeX">
   <div class="container is-max-desktop content">
