@@ -2,7 +2,11 @@
 
 An extension of the rasterization engine for the paper "3D Gaussian Splatting for Real-Time Rendering of Radiance Fields". 
 
-**We make two contributions: Depth forward and backward. We have verified its correctness on real datasets.**
+We make two contributions: 
+* Depth forward: render depth map, weight map, along with color map 
+* Depth backward: backpropagate the graidents from depth loss to Gaussians.
+
+**We have verified its correctness on real datasets under sparse view setting (e.g., 3 views), by supervising the optimization with monocular depth.**
 
 <section class="section" id="BibTeX">
   <div class="container is-max-desktop content">
