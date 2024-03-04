@@ -12,6 +12,8 @@ Note that our method calculates depth values based on volume rendering, and  cor
 
 **We have verified its correctness on real datasets under sparse view setting (e.g., 3 views), by supervising the optimization with monocular depth.**
 
+result of dataset `360v2 bonsai` : 
+
 <div><table frame=void>
 	<tr>
         <td><div><center>
@@ -27,7 +29,6 @@ Note that our method calculates depth values based on volume rendering, and  cor
     		depth map
         </center></div></td>
     </div><table frame=void>
-<p style="text-align: center;"><strong>dataset 360v2 bonsai</strong></p>
 
 ## Install
 
