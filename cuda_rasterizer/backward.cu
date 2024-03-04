@@ -460,7 +460,7 @@ renderCUDA(
 	const float T_final = inside ? final_Ts[pix_id] : 0;
 	float T = T_final;
 
-    const float Wei = inside ? final_Ws[pix_id] : 0;
+    const float Wei = inside ? final_Ws[pix_id] + 1e-6 : 1e-6;
 //    float Wei = W_final;
 
     const float Dep = inside ? final_Ds[pix_id] : 0;
