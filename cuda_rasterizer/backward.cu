@@ -476,10 +476,11 @@ renderCUDA(
     float dL_dD;
     float accum_wei = 0;  //i+1 to N
     float accum_dep = 0;  //i+1 to N
-	if (inside)
-		for (int i = 0; i < C; i++)
-			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+    if (inside){
+        for (int i = 0; i < C; i++)
+            dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
         dL_dD = dL_dDs[pix_id];
+    }
 
 	float last_alpha = 0;   //the current GS is i, last indicates i+1
 	float last_color[C] = { 0 };
